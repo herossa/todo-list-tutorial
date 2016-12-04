@@ -5,26 +5,12 @@ from flask import abort
 from flask import request
 from flask import url_for
 from flask import send_from_directory
-
 from flask.ext.httpauth import HTTPBasicAuth
+from mongo_crud_easier import MongoCrudEasier
 
 app = Flask(__name__)
 auth = HTTPBasicAuth()
-
-tasks = [
-	{
-		'id': 1,
-		'title': u'Buy groceries',
-		'description': u'Milk, Cheese, Pizza, Fruit, Tylenol',
-		'done': False
-	},
-	{
-		'id': 2,
-		'title': u'Learn Python',
-		'description': 'Need to find a good python tutorial on the web',
-		'done': False
-	}
-]
+mce = MongoCrudEasier()
 
 def make_public_task(task):
 	new_task= {}
@@ -45,32 +31,40 @@ def not_found(error):
 
 @app.route('/todo/api/v1.0/tasks/<int:task_id>', methods=['GET'])
 def get_task(task_id):
-	task = [task for task in tasks if task['id'] == task_id]
+	task = [task for task in mce.read() if task['id'] == task_id]
 	if len(task) == 0:
 		abort(404)
-	return jsonify({'tasks': make_public_task(task[0])})
+	return jsonify({ 'tasks': make_public_task({k: v for k, v in task[0].items() if k != '_id'}) } )
 
 @app.route('/todo/api/v1.0/tasks', methods=['GET'])
 @auth.login_required
 def get_tasks():
-    return jsonify({'tasks': [make_public_task(task) for task in tasks]})
+	tasks = [make_public_task(task) for task in mce.read()]
+	tasks_tmp = []
+	for task in tasks:
+		tmp_task = {}
+		for k, v in task.items():
+			if k != '_id':
+				tmp_task[k] = v
+		tasks_tmp.append(tmp_task)
+	return jsonify({'tasks': tasks_tmp})
 
 @app.route('/todo/api/v1.0/tasks', methods=['POST'])
 def create_task():
 	if not request.json or not 'title' in request.json:
 		abort(400)
 	task = {
-		'id': tasks[-1]['id'] + 1,
+		'id': mce.next_entry_id(),
 		'title': request.json['title'],
 		'description': request.json.get('description', ""),
 		'done': False
 	}
-	tasks.append(task)
+	mce.create(task['id'], task['title'], task['description'], task['done'])
 	return jsonify({'task': make_public_task(task)}), 201
 
 @app.route('/todo/api/v1.0/tasks/<int:task_id>', methods=['PUT'])
 def update_task(task_id):
-	task = [task for task in tasks if task['id'] == task_id]
+	task = [task for task in mce.read() if task['id'] == task_id]
 	if len(task) == 0:
 		abort(404)
 	if not request.json:
@@ -85,14 +79,16 @@ def update_task(task_id):
 	task[0]['title'] = request.json.get('title', task[0]['title'])
 	task[0]['description'] = request.json.get('description', task[0]['description'])
 	task[0]['done'] = request.json.get('done', task[0]['done'])
-	return jsonify({'task': make_public_task(task[0])})
+
+	mce.update(task[0]['id'], task[0]['title'], task[0]['description'], task[0]['done'])
+	return jsonify({ 'task': make_public_task({k: v for k, v in task[0].items() if k != '_id'}) } )
 
 @app.route('/todo/api/v1.0/tasks/<int:task_id>' ,methods=['DELETE'])
 def delete_task(task_id):
-	task = [task for task in tasks if task['id'] == task_id]
+	task = [task for task in mce.read() if task['id'] == task_id]
 	if len(task) == 0:
 		abort(404)
-	tasks.remove(task[0])
+	mce.remove(task[0]['id'])
 	return jsonify({'result': True})
 
 @auth.get_password
